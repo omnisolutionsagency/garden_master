@@ -1,14 +1,14 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   View, Text, ScrollView, TouchableOpacity, StyleSheet,
-  Alert, TextInput, ActivityIndicator,
+  Alert, TextInput, ActivityIndicator, KeyboardAvoidingView, Platform,
 } from 'react-native';
 import { useLocalSearchParams, router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useGardenStore } from '../../src/store/gardenStore';
 import { COLORS, SPACING, FONT, PLANT_PRESETS, GROWTH_STAGES } from '../../src/constants';
 import { getWateringHistory, getFertilizerHistory, getSchedule } from '../../src/services/plants';
-import { analyzeGardenPlant } from '../../src/services/claude';
+import { analyzeGardenPlant, chatAboutPlant, ChatMessage } from '../../src/services/claude';
 import { WateringLog, FertilizerLog, WateringSchedule, AiRecommendation } from '../../src/types';
 import dayjs from 'dayjs';
 
@@ -25,6 +25,13 @@ export default function PlantDetailScreen() {
   const [analyzing, setAnalyzing] = useState(false);
   const [localRec, setLocalRec] = useState<AiRecommendation | null>(null);
   const [waterAmount, setWaterAmount] = useState('');
+
+  // Chat state
+  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
+  const [chatInput, setChatInput] = useState('');
+  const [chatSending, setChatSending] = useState(false);
+  const [chatError, setChatError] = useState<string | null>(null);
+  const chatScrollRef = useRef<ScrollView | null>(null);
 
   const displayRec = localRec || rec;
   const icon = PLANT_PRESETS.find((p) => p.name.toLowerCase() === plant?.name.toLowerCase())?.icon || '🌱';
@@ -67,6 +74,52 @@ export default function PlantDetailScreen() {
     Alert.alert('Log Watering', `Record ${gal} gallons?`, [
       { text: 'Cancel', style: 'cancel' },
       { text: 'Log It', onPress: () => logWatering(id, gal) },
+    ]);
+  };
+
+  const handleSendChat = async () => {
+    if (!plant) return;
+    const trimmed = chatInput.trim();
+    if (!trimmed || chatSending) return;
+
+    const userMsg: ChatMessage = { role: 'user', content: trimmed };
+    const nextHistory = [...chatMessages, userMsg];
+    setChatMessages(nextHistory);
+    setChatInput('');
+    setChatError(null);
+    setChatSending(true);
+
+    try {
+      const reply = await chatAboutPlant({
+        plant,
+        garden: activeGarden,
+        weather,
+        recentWatering: wateringHistory,
+        recentFertilizer: fertHistory,
+        history: chatMessages,
+        userMessage: trimmed,
+      });
+      setChatMessages([...nextHistory, { role: 'assistant', content: reply }]);
+    } catch (err: any) {
+      setChatError(err.message || 'Something went wrong.');
+    } finally {
+      setChatSending(false);
+      setTimeout(() => chatScrollRef.current?.scrollToEnd({ animated: true }), 50);
+    }
+  };
+
+  const handleClearChat = () => {
+    if (chatMessages.length === 0) return;
+    Alert.alert('Clear chat?', 'This removes all messages in this conversation.', [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Clear',
+        style: 'destructive',
+        onPress: () => {
+          setChatMessages([]);
+          setChatError(null);
+        },
+      },
     ]);
   };
 
@@ -256,6 +309,94 @@ export default function PlantDetailScreen() {
         </View>
       )}
 
+      {/* Chat with AI */}
+      <View style={styles.section}>
+        <View style={styles.sectionHeader}>
+          <Text style={styles.sectionTitle}>Ask the Gardener</Text>
+          {chatMessages.length > 0 && (
+            <TouchableOpacity onPress={handleClearChat}>
+              <Text style={styles.clearChatLink}>Clear</Text>
+            </TouchableOpacity>
+          )}
+        </View>
+
+        <View style={styles.chatCard}>
+          {chatMessages.length === 0 ? (
+            <Text style={styles.chatPlaceholder}>
+              Ask anything about {plant.name} — pests, pruning, harvesting, diseases, companion plants, etc.
+            </Text>
+          ) : (
+            <ScrollView
+              ref={chatScrollRef}
+              style={styles.chatScroll}
+              contentContainerStyle={styles.chatScrollContent}
+              nestedScrollEnabled
+            >
+              {chatMessages.map((msg, i) => (
+                <View
+                  key={i}
+                  style={[
+                    styles.chatBubble,
+                    msg.role === 'user' ? styles.chatBubbleUser : styles.chatBubbleAi,
+                  ]}
+                >
+                  <Text
+                    style={[
+                      styles.chatBubbleText,
+                      msg.role === 'user' && styles.chatBubbleTextUser,
+                    ]}
+                  >
+                    {msg.content}
+                  </Text>
+                </View>
+              ))}
+              {chatSending && (
+                <View style={[styles.chatBubble, styles.chatBubbleAi]}>
+                  <ActivityIndicator size="small" color={COLORS.primary} />
+                </View>
+              )}
+            </ScrollView>
+          )}
+
+          {chatError && <Text style={styles.chatErrorText}>{chatError}</Text>}
+
+          <KeyboardAvoidingView
+            behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          >
+            <View style={styles.chatInputRow}>
+              <TextInput
+                style={styles.chatInput}
+                value={chatInput}
+                onChangeText={setChatInput}
+                placeholder="Type a question..."
+                placeholderTextColor={COLORS.textSecondary}
+                multiline
+                maxLength={800}
+                editable={!chatSending}
+                onSubmitEditing={handleSendChat}
+                blurOnSubmit={false}
+              />
+              <TouchableOpacity
+                style={[
+                  styles.chatSendButton,
+                  (!chatInput.trim() || chatSending) && styles.chatSendButtonDisabled,
+                ]}
+                onPress={handleSendChat}
+                disabled={!chatInput.trim() || chatSending}
+              >
+                <Ionicons
+                  name="send"
+                  size={18}
+                  color={
+                    !chatInput.trim() || chatSending ? COLORS.textSecondary : COLORS.textLight
+                  }
+                />
+              </TouchableOpacity>
+            </View>
+          </KeyboardAvoidingView>
+        </View>
+      </View>
+
       {/* Delete */}
       <TouchableOpacity style={styles.deleteButton} onPress={handleDelete}>
         <Ionicons name="trash-outline" size={18} color={COLORS.error} />
@@ -362,6 +503,82 @@ const styles = StyleSheet.create({
 
   // Notes
   notesText: { fontSize: FONT.sizes.md, color: COLORS.text, lineHeight: 22 },
+
+  // Chat
+  clearChatLink: { fontSize: FONT.sizes.sm, color: COLORS.textSecondary, fontWeight: '600' },
+  chatCard: {
+    backgroundColor: COLORS.surface,
+    borderRadius: 12,
+    padding: SPACING.sm,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+  },
+  chatPlaceholder: {
+    fontSize: FONT.sizes.sm,
+    color: COLORS.textSecondary,
+    fontStyle: 'italic',
+    paddingHorizontal: SPACING.sm,
+    paddingVertical: SPACING.md,
+  },
+  chatScroll: { maxHeight: 360 },
+  chatScrollContent: { paddingVertical: SPACING.sm },
+  chatBubble: {
+    maxWidth: '88%',
+    paddingHorizontal: SPACING.md,
+    paddingVertical: SPACING.sm,
+    borderRadius: 14,
+    marginBottom: SPACING.sm,
+  },
+  chatBubbleUser: {
+    backgroundColor: COLORS.primary,
+    alignSelf: 'flex-end',
+    borderBottomRightRadius: 4,
+  },
+  chatBubbleAi: {
+    backgroundColor: COLORS.surfaceAlt,
+    alignSelf: 'flex-start',
+    borderBottomLeftRadius: 4,
+  },
+  chatBubbleText: {
+    fontSize: FONT.sizes.sm,
+    color: COLORS.text,
+    lineHeight: 20,
+  },
+  chatBubbleTextUser: { color: COLORS.textLight },
+  chatErrorText: {
+    fontSize: FONT.sizes.xs,
+    color: COLORS.error,
+    paddingHorizontal: SPACING.sm,
+    paddingBottom: SPACING.xs,
+  },
+  chatInputRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    gap: SPACING.sm,
+    paddingTop: SPACING.xs,
+    borderTopWidth: 1,
+    borderTopColor: COLORS.border,
+    paddingHorizontal: SPACING.xs,
+  },
+  chatInput: {
+    flex: 1,
+    minHeight: 40,
+    maxHeight: 120,
+    fontSize: FONT.sizes.sm,
+    color: COLORS.text,
+    paddingVertical: SPACING.sm,
+    paddingHorizontal: SPACING.sm,
+  },
+  chatSendButton: {
+    backgroundColor: COLORS.primary,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 2,
+  },
+  chatSendButtonDisabled: { backgroundColor: COLORS.border },
 
   // Delete
   deleteButton: {

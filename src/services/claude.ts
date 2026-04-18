@@ -9,6 +9,21 @@ interface AnalysisInput {
   recentFertilizer: FertilizerLog[];
 }
 
+export interface ChatMessage {
+  role: 'user' | 'assistant';
+  content: string;
+}
+
+interface ChatInput {
+  plant: Plant;
+  garden?: Garden | null;
+  weather?: WeatherData | null;
+  recentWatering?: WateringLog[];
+  recentFertilizer?: FertilizerLog[];
+  history: ChatMessage[];
+  userMessage: string;
+}
+
 /**
  * Call the Supabase Edge Function which proxies to Claude API.
  * Keeps the Anthropic API key server-side.
@@ -83,6 +98,96 @@ async function isJwtError(error: unknown): Promise<boolean> {
     // ignore
   }
   return true; // Any 401 from the gateway is worth one refresh attempt.
+}
+
+/**
+ * Send a chat message about a specific plant. Returns the assistant's reply.
+ * History should include prior turns; userMessage is appended as the newest user turn.
+ */
+export async function chatAboutPlant(input: ChatInput): Promise<string> {
+  const system = buildChatSystem(input);
+  const messages: ChatMessage[] = [
+    ...input.history.filter((m) => m.content.trim().length > 0),
+    { role: 'user', content: input.userMessage },
+  ];
+
+  const body = {
+    mode: 'chat' as const,
+    system,
+    messages,
+    plant_id: input.plant.id,
+    garden_id: input.garden?.id,
+  };
+
+  await ensureFreshSession();
+
+  let { data, error } = await supabase.functions.invoke('analyze-garden', { body });
+
+  if (error && (await isJwtError(error))) {
+    const { error: refreshErr } = await supabase.auth.refreshSession();
+    if (refreshErr) {
+      throw new Error('Chat failed: session expired, please sign in again');
+    }
+    ({ data, error } = await supabase.functions.invoke('analyze-garden', { body }));
+  }
+
+  if (error) {
+    let detail = error.message;
+    try {
+      const ctx: any = (error as any).context;
+      if (ctx && typeof ctx.json === 'function') {
+        const errBody = await ctx.json();
+        detail = errBody?.error || JSON.stringify(errBody);
+      } else if (ctx && typeof ctx.text === 'function') {
+        detail = await ctx.text();
+      }
+    } catch {
+      // Fall back to error.message
+    }
+    throw new Error(`Chat failed: ${detail}`);
+  }
+
+  if (data?.error) throw new Error(`Chat failed: ${data.error}`);
+  const reply = typeof data?.reply === 'string' ? data.reply.trim() : '';
+  if (!reply) throw new Error('Chat failed: empty response');
+  return reply;
+}
+
+function buildChatSystem(input: ChatInput): string {
+  const { plant, garden, weather, recentWatering, recentFertilizer } = input;
+
+  const lastWatered = recentWatering?.[0];
+  const daysSinceWatered = lastWatered
+    ? Math.floor((Date.now() - new Date(lastWatered.watered_at).getTime()) / 86400000)
+    : null;
+
+  const lastFert = recentFertilizer?.[0];
+  const daysSinceFert = lastFert
+    ? Math.floor((Date.now() - new Date(lastFert.applied_at).getTime()) / 86400000)
+    : null;
+
+  const weatherLine = weather
+    ? `Current weather: ${weather.current.temp_f}°F, ${weather.current.conditions}, humidity ${weather.current.humidity}%, today H/L ${weather.today.high_f}/${weather.today.low_f}°F, rainfall ${weather.today.rainfall_inches}".`
+    : 'Weather data is unavailable.';
+
+  const gardenLine = garden
+    ? `Garden: USDA zone ${garden.usda_zone || 'unknown'}, soil ${garden.soil_type}, sun ${garden.sun_exposure}.`
+    : '';
+
+  return `You are a friendly, knowledgeable master gardener helping the user care for a specific plant.
+Keep answers concise, practical, and tailored to the plant and conditions below. If you don't know something, say so. Use plain text (no markdown headings, no JSON).
+
+PLANT: ${plant.name}${plant.variety ? ` (${plant.variety})` : ''}
+- Category: ${plant.category}
+- Growth stage: ${plant.growth_stage}
+- Container: ${plant.container_type}${plant.container_size_gallons ? ` (${plant.container_size_gallons} gal)` : ''}
+- Quantity: ${plant.quantity}
+- Planted: ${plant.planted_date || 'unknown'}
+${plant.notes ? `- Notes: ${plant.notes}` : ''}
+${gardenLine}
+${weatherLine}
+WATERING: ${daysSinceWatered !== null ? `last watered ${daysSinceWatered} day(s) ago (${lastWatered?.amount_gallons ?? '?'} gal)` : 'no watering recorded'}.
+FERTILIZER: ${daysSinceFert !== null ? `last applied ${daysSinceFert} day(s) ago (${lastFert?.fertilizer_type || '?'})` : 'no fertilizer recorded'}.`;
 }
 
 /**

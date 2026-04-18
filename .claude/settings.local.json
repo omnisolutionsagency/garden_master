@@ -12,7 +12,9 @@
       "Bash(echo \"exit=$?\")",
       "Bash(node -e \"console.log\\('version:', require\\('./node_modules/expo-notifications/package.json'\\).version\\)\")",
       "Bash(git add *)",
-      "Bash(git commit *)"
+      "Bash(git commit *)",
+      "Bash(git tag *)",
+      "Bash(git push *)"
     ]
   }
 }
