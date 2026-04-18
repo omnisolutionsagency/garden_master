@@ -11,10 +11,5 @@
   "include": [
     "**/*.ts",
     "**/*.tsx"
-  ],
-  "exclude": [
-    "node_modules",
-    "_old",
-    "supabase/functions"
   ]
 }

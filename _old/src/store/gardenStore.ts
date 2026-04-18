@@ -95,13 +95,7 @@ export const useGardenStore = create<GardenStore>((set, get) => ({
 
   refreshWeather: async () => {
     const { activeGarden } = get();
-    if (!activeGarden?.latitude || !activeGarden?.longitude) {
-      set({
-        error:
-          'Garden has no location set — open Settings and set latitude/longitude or a zip code.',
-      });
-      return;
-    }
+    if (!activeGarden?.latitude || !activeGarden?.longitude) return;
     try {
       const weather = await getCurrentWeather(
         activeGarden.latitude,
@@ -109,31 +103,13 @@ export const useGardenStore = create<GardenStore>((set, get) => ({
       );
       set({ weather });
     } catch (err: any) {
-      const msg = err?.message || 'Unknown error';
-      const hint = msg.includes('401')
-        ? ' Your OpenWeatherMap key may be inactive (new keys take up to 2 hours) or missing the free-tier subscription.'
-        : '';
-      set({ error: `Weather error: ${msg}.${hint}` });
+      set({ error: `Weather error: ${err.message}` });
     }
   },
 
   runAnalysis: async () => {
     const { activeGarden, plants, weather } = get();
-    if (!activeGarden) {
-      set({ error: 'No garden selected. Create a garden first.' });
-      return;
-    }
-    if (plants.length === 0) {
-      set({ error: 'Add at least one plant before running analysis.' });
-      return;
-    }
-    if (!weather) {
-      set({
-        error:
-          'Weather data unavailable — analysis needs current weather. Check your garden location and OpenWeatherMap API key.',
-      });
-      return;
-    }
+    if (!activeGarden || !weather || plants.length === 0) return;
 
     try {
       set({ isLoading: true });

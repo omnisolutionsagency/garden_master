@@ -1,0 +1,18 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(ls -la C:/apps/garden_master/.env*)",
+      "Bash(ls *)",
+      "Bash(npm install *)",
+      "Bash(node -e \"const pkg = require\\('./node_modules/react/package.json'\\); console.log\\('react:', pkg.version\\); const rn = require\\('./node_modules/react-native/package.json'\\); console.log\\('react-native:', rn.version\\); const ex = require\\('./node_modules/expo/package.json'\\); console.log\\('expo:', ex.version\\); const rd = require\\('./node_modules/react-dom/package.json'\\); console.log\\('react-dom:', rd.version\\);\")",
+      "Bash(npx expo *)",
+      "Bash(npx tsc *)",
+      "Bash(npm ls *)",
+      "Bash(node -e \"console.log\\(require\\('./node_modules/@types/react/package.json'\\).version\\)\")",
+      "Bash(echo \"exit=$?\")",
+      "Bash(node -e \"console.log\\('version:', require\\('./node_modules/expo-notifications/package.json'\\).version\\)\")",
+      "Bash(git add *)",
+      "Bash(git commit *)"
+    ]
+  }
+}

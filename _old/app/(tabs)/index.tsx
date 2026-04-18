@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState } from 'react';
 import {
   View,
   Text,
@@ -8,20 +8,12 @@ import {
   RefreshControl,
   Alert,
   ActivityIndicator,
-  LayoutAnimation,
-  Platform,
-  UIManager,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useGardenStore } from '../../src/store/gardenStore';
 import { COLORS, SPACING, FONT } from '../../src/constants';
 import { checkFrostRisk } from '../../src/services/weather';
-import { AiRecommendation } from '../../src/types';
 import dayjs from 'dayjs';
-
-if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
-  UIManager.setLayoutAnimationEnabledExperimental(true);
-}
 
 export default function TodayScreen() {
   const {
@@ -39,18 +31,6 @@ export default function TodayScreen() {
   } = useGardenStore();
 
   const [refreshing, setRefreshing] = useState(false);
-  const [expandedPlants, setExpandedPlants] = useState<Record<string, boolean>>({});
-  const [expandedSections, setExpandedSections] = useState<Record<string, boolean>>({});
-
-  const togglePlant = useCallback((plantId: string) => {
-    LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
-    setExpandedPlants((prev) => ({ ...prev, [plantId]: !prev[plantId] }));
-  }, []);
-
-  const toggleSection = useCallback((key: string) => {
-    LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
-    setExpandedSections((prev) => ({ ...prev, [key]: !prev[key] }));
-  }, []);
 
   const onRefresh = async () => {
     setRefreshing(true);
@@ -198,119 +178,25 @@ export default function TodayScreen() {
         ))
       )}
 
-      {/* AI Analysis Accordion */}
-      {Object.keys(recommendations).length > 0 && (
-        <>
-          <Text style={styles.sectionTitle}>AI Analysis</Text>
-          {plants.map((plant) => {
-            const rec = recommendations[plant.id];
-            if (!rec) return null;
-            const isExpanded = expandedPlants[plant.id] ?? false;
-            return (
-              <View key={`rec-${plant.id}`} style={styles.accordionCard}>
-                <TouchableOpacity
-                  style={styles.accordionHeader}
-                  onPress={() => togglePlant(plant.id)}
-                  activeOpacity={0.7}
-                >
-                  <View style={styles.accordionHeaderLeft}>
-                    <Text style={styles.accordionPlantName}>{plant.name}</Text>
-                    {rec.summary && (
-                      <Text style={styles.accordionSummaryPreview} numberOfLines={isExpanded ? 0 : 1}>
-                        {rec.summary}
-                      </Text>
-                    )}
-                  </View>
-                  <Ionicons
-                    name={isExpanded ? 'chevron-up' : 'chevron-down'}
-                    size={20}
-                    color={COLORS.textSecondary}
-                  />
-                </TouchableOpacity>
-
-                {isExpanded && (
-                  <View style={styles.accordionBody}>
-                    <AccordionSection
-                      sectionKey={`${plant.id}-water`}
-                      title="Watering"
-                      icon="water"
-                      iconColor={COLORS.waterBlue}
-                      expanded={expandedSections[`${plant.id}-water`] ?? true}
-                      onToggle={toggleSection}
-                    >
-                      {rec.watering ? (
-                        <>
-                          <DetailRow label="Amount" value={`${rec.watering.amount_gallons} gal`} />
-                          <DetailRow label="Every" value={`${rec.watering.frequency_days} days`} />
-                          <DetailRow label="Why" value={rec.watering.reasoning} />
-                          {rec.watering.adjustments?.length > 0 && (
-                            <View style={styles.adjustments}>
-                              {rec.watering.adjustments.map((adj, i) => (
-                                <Text key={i} style={styles.adjustmentItem}>• {adj}</Text>
-                              ))}
-                            </View>
-                          )}
-                        </>
-                      ) : (
-                        <Text style={styles.noData}>No watering data</Text>
-                      )}
-                    </AccordionSection>
-
-                    <AccordionSection
-                      sectionKey={`${plant.id}-fert`}
-                      title="Fertilizer"
-                      icon="leaf"
-                      iconColor={COLORS.fertilizerBrown}
-                      expanded={expandedSections[`${plant.id}-fert`] ?? false}
-                      onToggle={toggleSection}
-                    >
-                      {rec.fertilizer ? (
-                        <>
-                          <DetailRow label="Type" value={rec.fertilizer.type} />
-                          <DetailRow label="Amount" value={rec.fertilizer.amount} />
-                          <DetailRow label="Frequency" value={rec.fertilizer.frequency} />
-                          <DetailRow label="NPK" value={rec.fertilizer.npk_ratio} />
-                          <DetailRow label="Why" value={rec.fertilizer.reasoning} />
-                        </>
-                      ) : (
-                        <Text style={styles.noData}>No fertilizer data</Text>
-                      )}
-                    </AccordionSection>
-
-                    {rec.alerts && rec.alerts.length > 0 && (
-                      <AccordionSection
-                        sectionKey={`${plant.id}-alerts`}
-                        title={`Alerts (${rec.alerts.length})`}
-                        icon="alert-circle"
-                        iconColor={COLORS.warning}
-                        expanded={expandedSections[`${plant.id}-alerts`] ?? true}
-                        onToggle={toggleSection}
-                      >
-                        {rec.alerts.map((alert, i) => (
-                          <View
-                            key={i}
-                            style={[
-                              styles.alertInline,
-                              alert.severity === 'critical' && styles.alertInlineCritical,
-                              alert.severity === 'warning' && styles.alertInlineWarning,
-                            ]}
-                          >
-                            <Ionicons
-                              name={alert.severity === 'critical' ? 'alert-circle' : 'information-circle'}
-                              size={16}
-                              color={alert.severity === 'critical' ? COLORS.error : COLORS.warning}
-                            />
-                            <Text style={styles.alertInlineText}>{alert.message}</Text>
-                          </View>
-                        ))}
-                      </AccordionSection>
-                    )}
-                  </View>
-                )}
-              </View>
-            );
-          })}
-        </>
+      {/* AI Alerts */}
+      {Object.entries(recommendations).map(([plantId, rec]) =>
+        (rec.alerts || []).map((alert, i) => (
+          <View
+            key={`alert-${plantId}-${i}`}
+            style={[
+              styles.alertCard,
+              alert.severity === 'critical' && styles.alertCritical,
+              alert.severity === 'warning' && styles.alertWarning,
+            ]}
+          >
+            <Ionicons
+              name={alert.severity === 'critical' ? 'alert-circle' : 'information-circle'}
+              size={20}
+              color={alert.severity === 'critical' ? COLORS.error : COLORS.warning}
+            />
+            <Text style={styles.alertCardText}>{alert.message}</Text>
+          </View>
+        ))
       )}
 
       {/* 7-Day Forecast Mini */}
@@ -346,52 +232,6 @@ function WeatherStat({ icon, label, value }: { icon: string; label: string; valu
       <Ionicons name={icon as any} size={16} color={COLORS.textLight} />
       <Text style={styles.weatherStatValue}>{value}</Text>
       <Text style={styles.weatherStatLabel}>{label}</Text>
-    </View>
-  );
-}
-
-function AccordionSection({
-  sectionKey,
-  title,
-  icon,
-  iconColor,
-  expanded,
-  onToggle,
-  children,
-}: {
-  sectionKey: string;
-  title: string;
-  icon: string;
-  iconColor: string;
-  expanded: boolean;
-  onToggle: (key: string) => void;
-  children: React.ReactNode;
-}) {
-  return (
-    <View style={styles.subSection}>
-      <TouchableOpacity
-        style={styles.subSectionHeader}
-        onPress={() => onToggle(sectionKey)}
-        activeOpacity={0.7}
-      >
-        <Ionicons name={icon as any} size={16} color={iconColor} />
-        <Text style={styles.subSectionTitle}>{title}</Text>
-        <Ionicons
-          name={expanded ? 'chevron-up' : 'chevron-down'}
-          size={16}
-          color={COLORS.textSecondary}
-        />
-      </TouchableOpacity>
-      {expanded && <View style={styles.subSectionBody}>{children}</View>}
-    </View>
-  );
-}
-
-function DetailRow({ label, value }: { label: string; value: string }) {
-  return (
-    <View style={styles.detailRow}>
-      <Text style={styles.detailLabel}>{label}</Text>
-      <Text style={styles.detailValue}>{value}</Text>
     </View>
   );
 }
@@ -505,102 +345,21 @@ const styles = StyleSheet.create({
   },
   overdueBadgeText: { color: COLORS.textLight, fontSize: 10, fontWeight: '700' },
 
-  // Accordion
-  accordionCard: {
-    backgroundColor: COLORS.surface,
-    borderRadius: 12,
-    marginBottom: SPACING.sm,
-    borderWidth: 1,
-    borderColor: COLORS.border,
-    overflow: 'hidden',
-  },
-  accordionHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    padding: SPACING.md,
-  },
-  accordionHeaderLeft: { flex: 1, marginRight: SPACING.sm },
-  accordionPlantName: {
-    fontSize: FONT.sizes.md,
-    fontWeight: '700',
-    color: COLORS.text,
-  },
-  accordionSummaryPreview: {
-    fontSize: FONT.sizes.sm,
-    color: COLORS.textSecondary,
-    marginTop: 2,
-  },
-  accordionBody: {
-    paddingHorizontal: SPACING.md,
-    paddingBottom: SPACING.md,
-    borderTopWidth: 1,
-    borderTopColor: COLORS.border,
-  },
-  subSection: {
-    marginTop: SPACING.sm,
-  },
-  subSectionHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: SPACING.sm,
-    paddingVertical: SPACING.sm,
-  },
-  subSectionTitle: {
-    flex: 1,
-    fontSize: FONT.sizes.sm,
-    fontWeight: '600',
-    color: COLORS.text,
-  },
-  subSectionBody: {
-    paddingLeft: SPACING.lg,
-    paddingBottom: SPACING.xs,
-  },
-  detailRow: {
-    flexDirection: 'row',
-    paddingVertical: 4,
-  },
-  detailLabel: {
-    width: 80,
-    fontSize: FONT.sizes.sm,
-    fontWeight: '600',
-    color: COLORS.textSecondary,
-  },
-  detailValue: {
-    flex: 1,
-    fontSize: FONT.sizes.sm,
-    color: COLORS.text,
-  },
-  adjustments: {
-    marginTop: 4,
-  },
-  adjustmentItem: {
-    fontSize: FONT.sizes.sm,
-    color: COLORS.textSecondary,
-    paddingVertical: 1,
-  },
-  noData: {
-    fontSize: FONT.sizes.sm,
-    color: COLORS.textSecondary,
-    fontStyle: 'italic',
-    paddingVertical: 4,
-  },
-  alertInline: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: SPACING.sm,
-    paddingVertical: 4,
-    paddingHorizontal: SPACING.sm,
-    borderRadius: 6,
+  // Alerts
+  alertCard: {
     backgroundColor: COLORS.surfaceAlt,
-    marginBottom: 4,
+    borderRadius: 10,
+    padding: SPACING.md,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: SPACING.sm,
+    marginBottom: SPACING.sm,
+    borderLeftWidth: 3,
+    borderLeftColor: COLORS.info,
   },
-  alertInlineCritical: { backgroundColor: '#C44B4B12' },
-  alertInlineWarning: { backgroundColor: '#E8A83812' },
-  alertInlineText: {
-    flex: 1,
-    fontSize: FONT.sizes.sm,
-    color: COLORS.text,
-  },
+  alertCritical: { borderLeftColor: COLORS.error, backgroundColor: '#C44B4B10' },
+  alertWarning: { borderLeftColor: COLORS.warning, backgroundColor: '#E8A83810' },
+  alertCardText: { flex: 1, fontSize: FONT.sizes.sm, color: COLORS.text },
 
   // Forecast
   forecastRow: { marginBottom: SPACING.lg },

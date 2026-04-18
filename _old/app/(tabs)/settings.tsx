@@ -36,6 +36,12 @@ export default function SettingsScreen() {
   useEffect(() => {
     getScheduledCount().then(setScheduledCount).catch(() => {});
   }, []);
+  const [usdaZone, setUsdaZone] = useState(activeGarden?.usda_zone || '');
+  const [soilType, setSoilType] = useState(activeGarden?.soil_type || 'loam');
+  const [sunExposure, setSunExposure] = useState(activeGarden?.sun_exposure || 'full');
+  const [lat, setLat] = useState<number | null>(activeGarden?.latitude || null);
+  const [lon, setLon] = useState<number | null>(activeGarden?.longitude || null);
+  const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     if (activeGarden) {

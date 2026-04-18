@@ -1,75 +1,133 @@
 import { WeatherData } from '../types';
 
 const API_KEY = process.env.EXPO_PUBLIC_OPENWEATHERMAP_API_KEY;
-const BASE_URL = 'https://api.openweathermap.org/data/3.0';
+const BASE_URL = 'https://api.openweathermap.org/data/2.5';
+
+interface OwmCurrent {
+  main: { temp: number; temp_min: number; temp_max: number; humidity: number };
+  weather: Array<{ main: string; description: string }>;
+  wind: { speed: number };
+  rain?: { '1h'?: number; '3h'?: number };
+}
+
+interface OwmForecastEntry {
+  dt: number;
+  main: { temp: number; temp_min: number; temp_max: number; humidity: number };
+  weather: Array<{ main: string }>;
+  rain?: { '3h'?: number };
+  dt_txt: string;
+}
+
+interface OwmForecast {
+  list: OwmForecastEntry[];
+}
 
 export async function getCurrentWeather(lat: number, lon: number): Promise<WeatherData> {
-  const url = `${BASE_URL}/onecall?lat=${lat}&lon=${lon}&units=imperial&appid=${API_KEY}`;
-  const res = await fetch(url);
-
-  if (!res.ok) {
-    throw new Error(`Weather API error: ${res.status}`);
+  if (!API_KEY) {
+    throw new Error('Missing OpenWeatherMap API key (EXPO_PUBLIC_OPENWEATHERMAP_API_KEY).');
   }
 
-  const data = await res.json();
+  const [currentRes, forecastRes] = await Promise.all([
+    fetch(`${BASE_URL}/weather?lat=${lat}&lon=${lon}&units=imperial&appid=${API_KEY}`),
+    fetch(`${BASE_URL}/forecast?lat=${lat}&lon=${lon}&units=imperial&appid=${API_KEY}`),
+  ]);
+
+  if (!currentRes.ok) {
+    const body = await currentRes.text();
+    throw new Error(`Weather API error ${currentRes.status}: ${body.slice(0, 200)}`);
+  }
+  if (!forecastRes.ok) {
+    const body = await forecastRes.text();
+    throw new Error(`Forecast API error ${forecastRes.status}: ${body.slice(0, 200)}`);
+  }
+
+  const current: OwmCurrent = await currentRes.json();
+  const forecast: OwmForecast = await forecastRes.json();
+
+  const currentRainMm = current.rain?.['1h'] ?? current.rain?.['3h'] ?? 0;
+
+  const daily = aggregateDaily(forecast.list);
+  const today = daily[0] ?? {
+    date: new Date().toISOString().split('T')[0],
+    high_f: Math.round(current.main.temp_max),
+    low_f: Math.round(current.main.temp_min),
+    rainfall_inches: parseFloat((currentRainMm / 25.4).toFixed(2)),
+    conditions: current.weather[0]?.main || 'Unknown',
+    humidity: current.main.humidity,
+  };
 
   return {
     current: {
-      temp_f: Math.round(data.current.temp),
-      humidity: data.current.humidity,
-      conditions: data.current.weather[0]?.main || 'Unknown',
-      wind_mph: Math.round(data.current.wind_speed),
-      uv_index: data.current.uvi,
+      temp_f: Math.round(current.main.temp),
+      humidity: current.main.humidity,
+      conditions: current.weather[0]?.main || 'Unknown',
+      wind_mph: Math.round(current.wind.speed),
+      uv_index: 0,
     },
     today: {
-      high_f: Math.round(data.daily[0].temp.max),
-      low_f: Math.round(data.daily[0].temp.min),
-      rainfall_inches: (data.daily[0].rain || 0) / 25.4, // mm to inches
+      high_f: today.high_f,
+      low_f: today.low_f,
+      rainfall_inches: today.rainfall_inches,
     },
-    forecast: data.daily.slice(0, 7).map((day: any) => ({
-      date: new Date(day.dt * 1000).toISOString().split('T')[0],
-      high_f: Math.round(day.temp.max),
-      low_f: Math.round(day.temp.min),
-      rainfall_inches: parseFloat(((day.rain || 0) / 25.4).toFixed(2)),
-      conditions: day.weather[0]?.main || 'Unknown',
-      humidity: day.humidity,
-    })),
+    forecast: daily.slice(0, 7),
   };
 }
 
-/**
- * Get total rainfall over the past N days from weather history.
- * Useful for determining if plants have already been watered by rain.
- */
-export async function getRecentRainfall(
-  lat: number,
-  lon: number,
-  days: number = 3
-): Promise<number> {
-  let totalInches = 0;
+function aggregateDaily(entries: OwmForecastEntry[]): WeatherData['forecast'] {
+  const byDate = new Map<
+    string,
+    { highs: number[]; lows: number[]; rainMm: number; conditions: string[]; humidity: number[] }
+  >();
 
-  for (let i = 1; i <= days; i++) {
-    const dt = Math.floor(Date.now() / 1000) - i * 86400;
-    const url = `${BASE_URL}/onecall/timemachine?lat=${lat}&lon=${lon}&dt=${dt}&units=imperial&appid=${API_KEY}`;
-
-    try {
-      const res = await fetch(url);
-      if (res.ok) {
-        const data = await res.json();
-        const rain = data.data?.[0]?.rain?.['1h'] || 0;
-        totalInches += rain / 25.4;
-      }
-    } catch {
-      // Skip failed day
-    }
+  for (const entry of entries) {
+    const date = entry.dt_txt.split(' ')[0];
+    const bucket =
+      byDate.get(date) ||
+      { highs: [], lows: [], rainMm: 0, conditions: [], humidity: [] };
+    bucket.highs.push(entry.main.temp_max);
+    bucket.lows.push(entry.main.temp_min);
+    bucket.rainMm += entry.rain?.['3h'] ?? 0;
+    bucket.conditions.push(entry.weather[0]?.main || 'Unknown');
+    bucket.humidity.push(entry.main.humidity);
+    byDate.set(date, bucket);
   }
 
-  return parseFloat(totalInches.toFixed(2));
+  return Array.from(byDate.entries()).map(([date, b]) => ({
+    date,
+    high_f: Math.round(Math.max(...b.highs)),
+    low_f: Math.round(Math.min(...b.lows)),
+    rainfall_inches: parseFloat((b.rainMm / 25.4).toFixed(2)),
+    conditions: mode(b.conditions),
+    humidity: Math.round(b.humidity.reduce((s, h) => s + h, 0) / b.humidity.length),
+  }));
+}
+
+function mode(values: string[]): string {
+  const counts = new Map<string, number>();
+  for (const v of values) counts.set(v, (counts.get(v) || 0) + 1);
+  let best = values[0] || 'Unknown';
+  let bestCount = 0;
+  for (const [v, c] of counts) {
+    if (c > bestCount) {
+      best = v;
+      bestCount = c;
+    }
+  }
+  return best;
 }
 
 /**
- * Simple frost alert check
+ * Get total rainfall over the past N days. Historical data isn't available on
+ * the free tier, so we return 0 and rely on the forecast rainfall instead.
  */
+export async function getRecentRainfall(
+  _lat: number,
+  _lon: number,
+  _days: number = 3
+): Promise<number> {
+  return 0;
+}
+
 export function checkFrostRisk(forecast: WeatherData['forecast']): boolean {
   return forecast.some((day) => day.low_f <= 35);
 }
@@ -81,8 +139,7 @@ export function checkFrostRisk(forecast: WeatherData['forecast']): boolean {
 export function estimateET(highF: number, lowF: number, dayOfYear: number): number {
   const avgF = (highF + lowF) / 2;
   const range = highF - lowF;
-  // Simplified - real ET calc would include solar radiation
-  const ra = 15 + 10 * Math.sin(((dayOfYear - 80) / 365) * 2 * Math.PI); // approx MJ/m2/day
+  const ra = 15 + 10 * Math.sin(((dayOfYear - 80) / 365) * 2 * Math.PI);
   const etMm = 0.0023 * (avgF + 17.8) * Math.sqrt(range) * ra * 0.408;
-  return parseFloat((etMm / 25.4).toFixed(3)); // convert mm to inches
+  return parseFloat((etMm / 25.4).toFixed(3));
 }
