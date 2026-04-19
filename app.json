@@ -10,7 +10,9 @@
       "backgroundColor": "#2D5A3D",
       "resizeMode": "contain"
     },
-    "assetBundlePatterns": ["**/*"],
+    "assetBundlePatterns": [
+      "**/*"
+    ],
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.omnisolutions.gardenmanager",
@@ -23,7 +25,12 @@
         "backgroundColor": "#2D5A3D"
       },
       "package": "com.omnisolutions.gardenmanager",
-      "permissions": ["ACCESS_FINE_LOCATION", "ACCESS_COARSE_LOCATION"]
+      "permissions": [
+        "ACCESS_FINE_LOCATION",
+        "ACCESS_COARSE_LOCATION",
+        "android.permission.ACCESS_COARSE_LOCATION",
+        "android.permission.ACCESS_FINE_LOCATION"
+      ]
     },
     "web": {
       "bundler": "metro",
@@ -38,6 +45,12 @@
           "locationWhenInUsePermission": "Allow Garden Manager to access your location for weather data."
         }
       ]
-    ]
+    ],
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "419ee6b5-3360-457d-b522-a9c39c18e733"
+      }
+    }
   }
 }
